@@ -28,6 +28,19 @@ bool LRUReplacer::victim(frame_id_t* frame_id) {
     //  利用lru_replacer中的LRUlist_,LRUHash_实现LRU策略
     //  选择合适的frame指定为淘汰页面,赋值给*frame_id
 
+
+    // 没有空闲frame可以淘汰
+    if (LRUlist_.empty()) return false;
+
+    // 淘汰LRUlist_中最后一个frame，即最近最少被访问的frame
+    auto victim_frame = LRUlist_.back();
+    LRUlist_.pop_back();
+    // 从hash表中移除被淘汰的frame
+    auto it = LRUhash_.find(victim_frame);
+    if (it != LRUhash_.end()) {
+        LRUhash_.erase(it);
+    }
+    *frame_id = victim_frame;
     return true;
 }
 
@@ -40,6 +53,11 @@ void LRUReplacer::pin(frame_id_t frame_id) {
     // Todo:
     // 固定指定id的frame
     // 在数据结构中移除该frame
+    auto it = LRUhash_.find(frame_id);
+    if (it != LRUhash_.end()) {
+        LRUlist_.erase(it->second);
+        LRUhash_.erase(it);
+    }
 }
 
 /**
@@ -47,9 +65,18 @@ void LRUReplacer::pin(frame_id_t frame_id) {
  * @param {frame_id_t} frame_id 取消固定的frame的id
  */
 void LRUReplacer::unpin(frame_id_t frame_id) {
-    // Todo:
-    //  支持并发锁
-    //  选择一个frame取消固定
+    std::scoped_lock lock{latch_};
+    // 已经被取消固定了，直接返回
+    if (LRUhash_.find(frame_id) != LRUhash_.end()) return;
+
+    // 如果LRUReplacer已经满了，则不再添加新的frame
+    if (LRUlist_.size() >= max_size_) {
+        return;
+    }
+
+    // 取消固定指定id的frame
+    LRUlist_.push_front(frame_id);
+    LRUhash_[frame_id] = LRUlist_.begin();
 }
 
 /**
